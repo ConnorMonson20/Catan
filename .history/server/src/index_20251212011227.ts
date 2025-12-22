@@ -1,0 +1,298 @@
+import { WebSocketServer, WebSocket } from 'ws';
+import {
+  ClientMessage,
+  OutgoingMessage,
+} from './types';
+import {
+  addPlayer,
+  buildStateMessage,
+  createInitialState,
+  handleBankTrade,
+  handleBuild,
+  handleBuyDevCard,
+  handleEndTurn,
+  handleMoveRobber,
+  handlePlayKnight,
+  handlePlayMonopoly,
+  handlePlayRoadBuilding,
+  handlePlayYearOfPlenty,
+  handleCheatGain,
+  handleDebugSetup,
+  resetState,
+  handleSetCustomMap,
+  handleSetCustomBoard,
+  handleRoll,
+  serializeState,
+  startGame,
+} from './game';
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const state = createInitialState();
+const clients = new Map<WebSocket, string | null>();
+
+const wss = new WebSocketServer({ port: PORT });
+console.log(`Catan server listening on ws://localhost:${PORT}`);
+
+function send(ws: WebSocket, message: OutgoingMessage) {
+  ws.send(JSON.stringify(message));
+}
+
+function broadcast(message: OutgoingMessage) {
+  const data = JSON.stringify(message);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+function broadcastState() {
+  broadcast({ type: 'state', state: serializeState(state) });
+}
+
+wss.on('connection', (ws) => {
+  send(ws, { type: 'state', state: serializeState(state) });
+
+  ws.on('message', (raw) => {
+    let message: ClientMessage;
+    try {
+      message = JSON.parse(raw.toString()) as ClientMessage;
+    } catch {
+      send(ws, { type: 'error', message: 'Invalid message.' });
+      return;
+    }
+
+    const playerId = clients.get(ws) || undefined;
+
+    switch (message.type) {
+      case 'join': {
+        if (message.playerId) {
+          const existing = state.players.find((p) => p.id === message.playerId);
+          if (existing) {
+            clients.set(ws, existing.id);
+            send(ws, { type: 'joined', playerId: existing.id });
+            send(ws, { type: 'state', state: serializeState(state) });
+            return;
+          }
+        }
+        const { player, error } = addPlayer(state, message.name);
+        if (error || !player) {
+          send(ws, { type: 'error', message: error || 'Unable to join.' });
+          return;
+        }
+        clients.set(ws, player.id);
+        send(ws, { type: 'joined', playerId: player.id });
+        broadcastState();
+        break;
+      }
+      case 'start': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = startGame(state);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'reset': {
+        resetState(state);
+        clients.forEach((_, socket) => clients.set(socket, null));
+        broadcastState();
+        break;
+      }
+      case 'cheatGain': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleCheatGain(state, playerId, message.resource, message.amount);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'build': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleBuild(state, playerId, message.buildType, message.vertexId, message.edgeId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'rollDice': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const { error } = handleRoll(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'endTurn': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleEndTurn(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'moveRobber': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleMoveRobber(state, playerId, message.hexId, message.targetPlayerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'buyDevCard': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleBuyDevCard(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'playKnight': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handlePlayKnight(state, playerId, message.hexId, message.targetPlayerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'playMonopoly': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handlePlayMonopoly(state, playerId, message.resource);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'playYearOfPlenty': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handlePlayYearOfPlenty(state, playerId, message.resourceA, message.resourceB);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'playRoadBuilding': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handlePlayRoadBuilding(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'bankTrade': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleBankTrade(state, playerId, message.give, message.get);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'debugSetup': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleDebugSetup(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setCustomMap': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetCustomMap(state, playerId, message.hexes);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setCustomBoard': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetCustomBoard(state, playerId, message.hexes, message.ports);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      default:
+        send(ws, { type: 'error', message: 'Unknown action.' });
+        break;
+    }
+  });
+
+  ws.on('close', () => {
+    clients.delete(ws);
+  });
+});
