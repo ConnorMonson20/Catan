@@ -4,6 +4,9 @@ exports.createInitialState = createInitialState;
 exports.addPlayer = addPlayer;
 exports.serializeState = serializeState;
 exports.startGame = startGame;
+exports.handleSetReady = handleSetReady;
+exports.handleSetColor = handleSetColor;
+exports.handleSetColorHover = handleSetColorHover;
 exports.handleBuild = handleBuild;
 exports.handleRoll = handleRoll;
 exports.handleDiscardChoice = handleDiscardChoice;
@@ -64,8 +67,8 @@ function buildDevDeck() {
     ];
     return shuffle(deck);
 }
-function createInitialState() {
-    const board = (0, board_1.buildBoard)();
+function createInitialState(options) {
+    const board = options?.randomizeBoard ? (0, board_1.buildRandomBoard)() : (0, board_1.buildBoard)();
     const vertexOwner = {};
     const edgeOwner = {};
     board.vertices.forEach((v) => (vertexOwner[v.id] = null));
@@ -75,6 +78,7 @@ function createInitialState() {
         phase: 'lobby',
         board,
         players: [],
+        hostId: null,
         vertexOwner,
         edgeOwner,
         log: [],
@@ -126,6 +130,8 @@ function addPlayer(state, name, requestedColor) {
         id,
         name,
         color: colorToUse,
+        ready: false,
+        hoverColor: null,
         resources: emptyResources(),
         devCards: [],
         newlyBoughtDev: {
@@ -147,6 +153,9 @@ function addPlayer(state, name, requestedColor) {
         victoryPoints: 0,
     };
     state.players.push(player);
+    if (!state.hostId) {
+        state.hostId = player.id;
+    }
     addLog(state, `${name} joined the lobby.`);
     return { player };
 }
@@ -162,6 +171,8 @@ function serializeState(state, viewingPlayerId) {
                 id: p.id,
                 name: p.name,
                 color: p.color,
+                ready: p.ready,
+                hoverColor: p.hoverColor ?? null,
                 resources: isViewer ? { ...p.resources } : maskedResources,
                 devCards: isViewer ? [...p.devCards] : maskedDev,
                 resourceCount: Object.values(p.resources).reduce((a, b) => a + b, 0),
@@ -181,11 +192,10 @@ function serializeState(state, viewingPlayerId) {
         }),
     };
 }
-function startGame(state) {
-    if (state.phase !== 'lobby')
-        return 'Game already started.';
-    if (state.players.length < 1)
-        return 'Need at least 1 player to start.';
+function allPlayersReady(state) {
+    return state.players.length > 0 && state.players.every((p) => p.ready);
+}
+function beginGame(state) {
     assignCloudContents(state);
     state.awaitingDiscard = false;
     state.discardPending = {};
@@ -196,11 +206,64 @@ function startGame(state) {
     state.setupIndex = 0;
     state.setupStep = 'settlement';
     state.currentPlayerIndex = 0;
+    state.players.forEach((p) => {
+        p.hoverColor = null;
+    });
     addLog(state, 'Game started. Setup round 1.');
+}
+function startGame(state, playerId) {
+    if (state.phase !== 'lobby')
+        return 'Game already started.';
+    if (state.players.length < 1)
+        return 'Need at least 1 player to start.';
+    if (!state.hostId || state.hostId !== playerId)
+        return 'Only the host can start the game.';
+    if (!allPlayersReady(state))
+        return 'All players must be ready.';
+    beginGame(state);
     return null;
 }
 function getPlayer(state, playerId) {
     return state.players.find((p) => p.id === playerId);
+}
+function handleSetReady(state, playerId, ready) {
+    if (state.phase !== 'lobby')
+        return 'Can only ready in lobby.';
+    const player = getPlayer(state, playerId);
+    if (!player)
+        return 'Player not found.';
+    player.ready = !!ready;
+    if (allPlayersReady(state)) {
+        beginGame(state);
+    }
+    return null;
+}
+function handleSetColor(state, playerId, color) {
+    if (state.phase !== 'lobby')
+        return 'Can only change color in lobby.';
+    const player = getPlayer(state, playerId);
+    if (!player)
+        return 'Player not found.';
+    if (!types_1.PLAYER_COLORS.includes(color)) {
+        return 'Invalid color choice.';
+    }
+    const taken = state.players.some((p) => p.id !== playerId && p.color === color);
+    if (taken)
+        return 'Color already taken.';
+    player.color = color;
+    return null;
+}
+function handleSetColorHover(state, playerId, color) {
+    if (state.phase !== 'lobby')
+        return 'Can only hover colors in lobby.';
+    const player = getPlayer(state, playerId);
+    if (!player)
+        return 'Player not found.';
+    if (color !== null && !types_1.PLAYER_COLORS.includes(color)) {
+        return 'Invalid color choice.';
+    }
+    player.hoverColor = color;
+    return null;
 }
 function canAfford(player, cost) {
     return Object.keys(cost).every((res) => player.resources[res] >= (cost[res] || 0));
@@ -256,8 +319,14 @@ function canPlaceRoad(state, player, edgeId) {
 function canPlaceSettlement(state, player, vertexId, free) {
     if (!isVertexClear(state, vertexId))
         return false;
+    const touching = state.board.vertexHexes[vertexId] || [];
+    const touchesLand = touching.some((hid) => {
+        const res = state.board.hexes.find((h) => h.id === hid)?.resource;
+        return res && res !== 'water';
+    });
+    if (!touchesLand)
+        return false;
     if (free) {
-        const touching = state.board.vertexHexes[vertexId] || [];
         const blocksCloud = touching.some((hid) => state.board.hexes.find((h) => h.id === hid)?.resource === 'cloud');
         if (blocksCloud)
             return false;
@@ -303,12 +372,10 @@ function updateLargestArmy(state) {
     }
 }
 function computeLongestRoad(state, player) {
-    // Build adjacency graph of the player's roads.
     const blockedVertices = new Set(Object.entries(state.vertexOwner)
         .filter(([, owner]) => owner && owner !== player.id)
         .map(([vertexId]) => vertexId));
-    const edges = Array.from(player.roads);
-    const edgeList = edges
+    const edgeList = Array.from(player.roads)
         .map((id) => state.board.edges.find((e) => e.id === id))
         .filter((e) => Boolean(e));
     const adjacency = {};
@@ -322,24 +389,34 @@ function computeLongestRoad(state, player) {
         adjacency[b].push({ to: a, edgeId: edge.id });
     }
     let best = 0;
-    const seenEdges = new Set();
-    function dfs(vertex, length) {
+    function dfs(start, vertex, length, seenEdges, seenVertices) {
         best = Math.max(best, length);
         for (const next of adjacency[vertex] || []) {
             if (seenEdges.has(next.edgeId))
                 continue;
-            if (blockedVertices.has(next.to) && !ownsVertex(state, player.id, next.to)) {
-                // Can enter the blocked vertex as an endpoint but not pass through.
+            if (blockedVertices.has(next.to)) {
+                if (!seenVertices.has(next.to)) {
+                    best = Math.max(best, length + 1);
+                }
+                continue;
+            }
+            if (next.to === start && length > 0) {
                 best = Math.max(best, length + 1);
                 continue;
             }
+            if (seenVertices.has(next.to))
+                continue;
             seenEdges.add(next.edgeId);
-            dfs(next.to, length + 1);
+            seenVertices.add(next.to);
+            dfs(start, next.to, length + 1, seenEdges, seenVertices);
+            seenVertices.delete(next.to);
             seenEdges.delete(next.edgeId);
         }
     }
     for (const v of Object.keys(adjacency)) {
-        dfs(v, 0);
+        const seenEdges = new Set();
+        const seenVertices = new Set([v]);
+        dfs(v, v, 0, seenEdges, seenVertices);
     }
     player.longestRoadLength = best;
 }
@@ -480,30 +557,7 @@ function discoverAdjacentClouds(state, player, edgeId) {
     const hexesA = state.board.vertexHexes[edge.v1] || [];
     const hexesB = state.board.vertexHexes[edge.v2] || [];
     const edgeHexes = hexesA.filter((id) => hexesB.includes(id));
-    const hexByCoord = new Map();
-    for (const h of state.board.hexes) {
-        hexByCoord.set(`${h.q},${h.r}`, h);
-    }
-    const neighborOffsets = [
-        [1, 0],
-        [1, -1],
-        [0, -1],
-        [-1, 0],
-        [-1, 1],
-        [0, 1],
-    ];
-    const candidates = new Set(edgeHexes);
     for (const hid of edgeHexes) {
-        const hex = state.board.hexes.find((h) => h.id === hid);
-        if (!hex)
-            continue;
-        for (const [dq, dr] of neighborOffsets) {
-            const neighbor = hexByCoord.get(`${hex.q + dq},${hex.r + dr}`);
-            if (neighbor)
-                candidates.add(neighbor.id);
-        }
-    }
-    for (const hid of candidates) {
         const hex = state.board.hexes.find((h) => h.id === hid);
         if (!hex || hex.resource !== 'cloud')
             continue;
@@ -1019,6 +1073,7 @@ function handleSetCustomBoard(state, playerId, hexes, ports) {
             const key = `${v.x.toFixed(4)},${v.y.toFixed(4)}`;
             keyToVertex[key] = v.id;
         }
+        const hexById = new Map(board.hexes.map((h) => [h.id, h]));
         board.ports = [];
         for (let i = 0; i < ports.length; i++) {
             const p = ports[i];
@@ -1040,7 +1095,43 @@ function handleSetCustomBoard(state, playerId, hexes, ports) {
                         bridges.push(bVid);
                 }
             }
-            board.ports.push({ id: p.id || `port-${i}`, vertexId: vid, ratio: p.ratio, resource: p.resource, bridges });
+            const touching = board.vertexHexes[vid] || [];
+            let waterHexId;
+            if (p.id && hexById.get(p.id)?.resource === 'water' && touching.includes(p.id)) {
+                waterHexId = p.id;
+            }
+            else {
+                const fallbackWater = touching.find((hexId) => hexById.get(hexId)?.resource === 'water');
+                if (fallbackWater)
+                    waterHexId = fallbackWater;
+            }
+            board.ports.push({
+                id: p.id || `port-${i}`,
+                vertexId: vid,
+                waterHexId,
+                ratio: p.ratio,
+                resource: p.resource,
+                bridges,
+            });
+        }
+        for (const [i, p] of board.ports.entries()) {
+            const touching = board.vertexHexes[p.vertexId] || [];
+            let touchesWater = false;
+            let touchesLand = false;
+            for (const hexId of touching) {
+                const res = hexById.get(hexId)?.resource;
+                if (!res)
+                    continue;
+                if (res === 'water')
+                    touchesWater = true;
+                else
+                    touchesLand = true;
+                if (touchesWater && touchesLand)
+                    break;
+            }
+            if (!touchesWater || !touchesLand) {
+                return `Port ${i} must be placed on a coastal water tile.`;
+            }
         }
         // Prevent duplicate ports on the same vertex
         const seenVerts = new Set();
@@ -1148,8 +1239,8 @@ function handleUpdateSettings(state, playerId, settings) {
     addLog(state, 'Game settings updated.');
     return null;
 }
-function resetState(state) {
-    const fresh = createInitialState();
+function resetState(state, options) {
+    const fresh = createInitialState(options);
     Object.keys(fresh).forEach((key) => {
         // @ts-ignore
         state[key] = fresh[key];
@@ -1218,11 +1309,12 @@ function handleBankTrade(state, playerId, give, get, ratio = 4) {
     let best = ratio;
     if (state.board.ports && state.board.ports.length) {
         for (const p of state.board.ports) {
-            const owner = state.vertexOwner[p.vertexId];
-            if (owner === playerId) {
-                if (!p.resource || p.resource === 'any' || p.resource === give) {
-                    best = Math.min(best, p.ratio);
-                }
+            const portVertices = new Set([p.vertexId, ...(p.bridges || [])]);
+            const ownsPort = Array.from(portVertices).some((vid) => state.vertexOwner[vid] === playerId);
+            if (!ownsPort)
+                continue;
+            if (!p.resource || p.resource === 'any' || p.resource === give) {
+                best = Math.min(best, p.ratio);
             }
         }
     }

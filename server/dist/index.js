@@ -45,6 +45,15 @@ wss.on('connection', (ws, req) => {
         const playerId = clients.get(ws) || undefined;
         switch (message.type) {
             case 'join': {
+                const existingClientId = clients.get(ws);
+                if (existingClientId) {
+                    const stillPresent = state.players.some((p) => p.id === existingClientId);
+                    if (stillPresent) {
+                        send(ws, { type: 'error', message: 'Already joined.' });
+                        return;
+                    }
+                    clients.set(ws, null);
+                }
                 if (message.playerId) {
                     const existing = state.players.find((p) => p.id === message.playerId);
                     if (existing) {
@@ -69,7 +78,46 @@ wss.on('connection', (ws, req) => {
                     send(ws, { type: 'error', message: 'Join first.' });
                     return;
                 }
-                const error = (0, game_1.startGame)(state);
+                const error = (0, game_1.startGame)(state, playerId);
+                if (error) {
+                    send(ws, { type: 'error', message: error });
+                    return;
+                }
+                broadcastState();
+                break;
+            }
+            case 'setReady': {
+                if (!playerId) {
+                    send(ws, { type: 'error', message: 'Join first.' });
+                    return;
+                }
+                const error = (0, game_1.handleSetReady)(state, playerId, message.ready);
+                if (error) {
+                    send(ws, { type: 'error', message: error });
+                    return;
+                }
+                broadcastState();
+                break;
+            }
+            case 'setColor': {
+                if (!playerId) {
+                    send(ws, { type: 'error', message: 'Join first.' });
+                    return;
+                }
+                const error = (0, game_1.handleSetColor)(state, playerId, message.color);
+                if (error) {
+                    send(ws, { type: 'error', message: error });
+                    return;
+                }
+                broadcastState();
+                break;
+            }
+            case 'setColorHover': {
+                if (!playerId) {
+                    send(ws, { type: 'error', message: 'Join first.' });
+                    return;
+                }
+                const error = (0, game_1.handleSetColorHover)(state, playerId, message.color);
                 if (error) {
                     send(ws, { type: 'error', message: error });
                     return;
@@ -78,10 +126,21 @@ wss.on('connection', (ws, req) => {
                 break;
             }
             case 'reset': {
-                (0, game_1.endGame)(state);
-                state.players = [];
-                clients.forEach((_, socket) => clients.set(socket, null));
-                broadcastState();
+                const victoryPointsToWin = state.victoryPointsToWin;
+                const discardLimit = state.discardLimit;
+                (0, game_1.resetState)(state, { randomizeBoard: true });
+                state.victoryPointsToWin = victoryPointsToWin;
+                state.discardLimit = discardLimit;
+                const sockets = Array.from(wss.clients);
+                clients.clear();
+                sockets.forEach((client) => {
+                    try {
+                        client.close(1000, 'Reset');
+                    }
+                    catch {
+                        // ignore close failures
+                    }
+                });
                 break;
             }
             case 'cheatGain': {
@@ -340,6 +399,19 @@ wss.on('connection', (ws, req) => {
         }
     });
     ws.on('close', () => {
+        const playerId = clients.get(ws) || undefined;
         clients.delete(ws);
+        if (!playerId)
+            return;
+        if (state.phase !== 'lobby')
+            return;
+        const before = state.players.length;
+        state.players = state.players.filter((p) => p.id !== playerId);
+        if (state.hostId === playerId) {
+            state.hostId = state.players[0]?.id ?? null;
+        }
+        if (state.players.length !== before) {
+            broadcastState();
+        }
     });
 });

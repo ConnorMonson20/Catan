@@ -1,12 +1,43 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildBoard = buildBoard;
+exports.buildRandomBoard = buildRandomBoard;
 exports.buildBoardFromHexes = buildBoardFromHexes;
 const HEX_SIZE = 100;
 const SQRT3 = Math.sqrt(3);
 const BASE_RESOURCES = ['brick', 'lumber', 'wool', 'grain', 'ore', 'gold'];
 const isBaseResource = (res) => BASE_RESOURCES.includes(res);
 const keepsNumberToken = (res) => isBaseResource(res) || res === 'cloud';
+const CLASSIC_RESOURCES = [
+    'ore',
+    'brick',
+    'grain',
+    'wool',
+    'lumber',
+    'wool',
+    'grain',
+    'brick',
+    'ore',
+    'desert',
+    'grain',
+    'ore',
+    'lumber',
+    'wool',
+    'brick',
+    'lumber',
+    'grain',
+    'wool',
+    'lumber',
+];
+const CLASSIC_NUMBER_TOKENS = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11];
+function shuffle(arr) {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+}
 function axialToPixel({ q, r }) {
     return {
         x: HEX_SIZE * (SQRT3 * (q + r / 2)),
@@ -23,44 +54,41 @@ function corner(center, i) {
 function toKey({ x, y }) {
     return `${x.toFixed(4)},${y.toFixed(4)}`;
 }
-function buildBoard() {
-    // Default radius-2 (19-hex) classic board
+function coordsWithinRadius(radius) {
     const coords = [];
-    for (let q = -2; q <= 2; q++) {
-        for (let r = -2; r <= 2; r++) {
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = -radius; r <= radius; r++) {
             const s = -q - r;
-            if (Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= 2) {
+            if (Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= radius) {
                 coords.push({ q, r });
             }
         }
     }
     coords.sort((a, b) => (a.r === b.r ? a.q - b.q : a.r - b.r));
-    const resources = [
-        'ore',
-        'brick',
-        'grain',
-        'wool',
-        'lumber',
-        'wool',
-        'grain',
-        'brick',
-        'ore',
-        'desert',
-        'grain',
-        'ore',
-        'lumber',
-        'wool',
-        'brick',
-        'lumber',
-        'grain',
-        'wool',
-        'lumber',
-    ];
-    const numberTokens = [5, 2, 6, 3, 8, 10, 9, 12, 11, 4, 8, 10, 9, 4, 5, 6, 3, 11];
+    return coords;
+}
+function ringCoords(radius) {
+    const coords = [];
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = -radius; r <= radius; r++) {
+            const s = -q - r;
+            if (Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) === radius) {
+                coords.push({ q, r });
+            }
+        }
+    }
+    coords.sort((a, b) => (a.r === b.r ? a.q - b.q : a.r - b.r));
+    return coords;
+}
+function buildBoard() {
+    // Default radius-2 (19-hex) classic board with a surrounding water ring
+    const landCoords = coordsWithinRadius(2);
+    const waterCoords = ringCoords(3);
+    const numberTokens = [...CLASSIC_NUMBER_TOKENS];
     const hexes = [];
-    for (const coord of coords) {
+    for (const coord of landCoords) {
         const { x, y } = axialToPixel(coord);
-        const resource = resources[hexes.length];
+        const resource = CLASSIC_RESOURCES[hexes.length];
         const numberToken = resource === 'desert' ? undefined : numberTokens.shift();
         hexes.push({
             id: `${coord.q},${coord.r}`,
@@ -72,22 +100,86 @@ function buildBoard() {
             numberToken,
         });
     }
+    for (const coord of waterCoords) {
+        const { x, y } = axialToPixel(coord);
+        hexes.push({
+            id: `${coord.q},${coord.r}`,
+            q: coord.q,
+            r: coord.r,
+            x,
+            y,
+            resource: 'water',
+            numberToken: undefined,
+        });
+    }
     return buildBoardFromHexes(hexes, { includeDefaultPorts: true });
 }
-function generateDefaultPorts(vertices) {
+function buildRandomBoard() {
+    const landCoords = coordsWithinRadius(2);
+    const waterCoords = ringCoords(3);
+    const resources = shuffle(CLASSIC_RESOURCES);
+    const numberTokens = shuffle(CLASSIC_NUMBER_TOKENS);
+    const hexes = [];
+    let tokenIndex = 0;
+    for (const coord of landCoords) {
+        const { x, y } = axialToPixel(coord);
+        const resource = resources[hexes.length];
+        const numberToken = resource === 'desert' ? undefined : numberTokens[tokenIndex++];
+        hexes.push({
+            id: `${coord.q},${coord.r}`,
+            q: coord.q,
+            r: coord.r,
+            x,
+            y,
+            resource,
+            numberToken,
+        });
+    }
+    for (const coord of waterCoords) {
+        const { x, y } = axialToPixel(coord);
+        hexes.push({
+            id: `${coord.q},${coord.r}`,
+            q: coord.q,
+            r: coord.r,
+            x,
+            y,
+            resource: 'water',
+            numberToken: undefined,
+        });
+    }
+    return buildBoardFromHexes(hexes, { includeDefaultPorts: true });
+}
+function generateDefaultPorts(hexes, vertices, vertexNeighbors, vertexHexes) {
     if (!vertices.length)
         return [];
-    // place ports around outer ring, sorted by angle from board center
-    const cx = vertices.reduce((sum, v) => sum + v.x, 0) / vertices.length;
-    const cy = vertices.reduce((sum, v) => sum + v.y, 0) / vertices.length;
-    const withDist = vertices.map((v) => ({
-        ...v,
-        dist: Math.hypot(v.x - cx, v.y - cy),
-        angle: Math.atan2(v.y - cy, v.x - cx),
-    }));
-    const maxDist = Math.max(...withDist.map((v) => v.dist));
-    const rim = withDist
-        .filter((v) => v.dist >= maxDist - HEX_SIZE * 0.25)
+    const neighborOffsets = [
+        [1, 0],
+        [1, -1],
+        [0, -1],
+        [-1, 0],
+        [-1, 1],
+        [0, 1],
+    ];
+    const coordKey = (q, r) => `${q},${r}`;
+    const hexById = new Map(hexes.map((h) => [h.id, h]));
+    const hexByCoord = new Map();
+    for (const h of hexes) {
+        hexByCoord.set(coordKey(h.q, h.r), h);
+    }
+    const coastalWater = hexes.filter((h) => {
+        if (h.resource !== 'water')
+            return false;
+        return neighborOffsets.some(([dq, dr]) => {
+            const neighbor = hexByCoord.get(coordKey(h.q + dq, h.r + dr));
+            return neighbor && neighbor.resource !== 'water';
+        });
+    });
+    if (!coastalWater.length)
+        return [];
+    const cx = hexes.reduce((sum, h) => sum + h.x, 0) / hexes.length;
+    const cy = hexes.reduce((sum, h) => sum + h.y, 0) / hexes.length;
+    const waterRing = coastalWater
+        .map((h) => ({ hex: h, key: coordKey(h.q, h.r), angle: Math.atan2(h.y - cy, h.x - cx) }))
         .sort((a, b) => a.angle - b.angle);
     const portTemplates = [
         { ratio: 3, resource: 'any' },
@@ -100,11 +192,106 @@ function generateDefaultPorts(vertices) {
         { ratio: 2, resource: 'lumber' },
         { ratio: 2, resource: 'ore' },
     ];
+    const count = Math.min(portTemplates.length, waterRing.length);
+    if (!count)
+        return [];
+    const waterNeighbors = new Map();
+    for (const entry of waterRing) {
+        const neighbors = new Set();
+        for (const [dq, dr] of neighborOffsets) {
+            const neighbor = hexByCoord.get(coordKey(entry.hex.q + dq, entry.hex.r + dr));
+            if (neighbor && neighbor.resource === 'water') {
+                neighbors.add(coordKey(neighbor.q, neighbor.r));
+            }
+        }
+        waterNeighbors.set(entry.key, neighbors);
+    }
+    const selectFromOffset = (start) => {
+        const selected = [];
+        const blocked = new Set();
+        for (let i = 0; i < waterRing.length; i++) {
+            const entry = waterRing[(start + i) % waterRing.length];
+            if (blocked.has(entry.key))
+                continue;
+            selected.push(entry);
+            blocked.add(entry.key);
+            for (const n of waterNeighbors.get(entry.key) || []) {
+                blocked.add(n);
+            }
+            if (selected.length === count)
+                break;
+        }
+        return selected;
+    };
+    let selected = selectFromOffset(0);
+    for (let i = 1; i < waterRing.length && selected.length < count; i++) {
+        const attempt = selectFromOffset(i);
+        if (attempt.length > selected.length)
+            selected = attempt;
+        if (selected.length === count)
+            break;
+    }
+    const selectedKeys = new Set(selected.map((e) => e.key));
+    const orderedSelected = waterRing.filter((e) => selectedKeys.has(e.key));
+    const finalCount = Math.min(count, orderedSelected.length);
+    const vertexById = new Map(vertices.map((v) => [v.id, v]));
+    const hexToVertices = new Map();
+    for (const [vertexId, hexIds] of Object.entries(vertexHexes)) {
+        for (const hexId of hexIds) {
+            const arr = hexToVertices.get(hexId) || [];
+            arr.push(vertexId);
+            hexToVertices.set(hexId, arr);
+        }
+    }
+    const selectBridgeVertices = (waterHex) => {
+        const candidates = (hexToVertices.get(waterHex.id) || []).filter((vid) => {
+            const touching = vertexHexes[vid] || [];
+            return touching.some((hexId) => {
+                const res = hexById.get(hexId)?.resource;
+                return res && res !== 'water';
+            });
+        });
+        if (!candidates.length)
+            return [];
+        const withAngles = candidates
+            .map((vid) => {
+            const v = vertexById.get(vid);
+            if (!v)
+                return null;
+            return { vid, angle: Math.atan2(v.y - waterHex.y, v.x - waterHex.x) };
+        })
+            .filter(Boolean);
+        withAngles.sort((a, b) => a.angle - b.angle);
+        const ordered = withAngles.map((c) => c.vid);
+        if (ordered.length <= 2)
+            return ordered;
+        for (let i = 0; i < ordered.length; i++) {
+            const a = ordered[i];
+            const b = ordered[(i + 1) % ordered.length];
+            if ((vertexNeighbors[a] || []).includes(b)) {
+                return [a, b];
+            }
+        }
+        return [ordered[0], ordered[1]];
+    };
     const ports = [];
-    for (let i = 0; i < Math.min(portTemplates.length, rim.length); i++) {
-        const v = rim[Math.floor((i * rim.length) / portTemplates.length)];
+    for (let i = 0; i < finalCount; i++) {
+        const waterHex = orderedSelected[i]?.hex;
+        if (!waterHex)
+            continue;
         const tpl = portTemplates[i];
-        ports.push({ id: `port-${i}`, vertexId: v.id, ratio: tpl.ratio, resource: tpl.resource });
+        const bridges = selectBridgeVertices(waterHex);
+        const vertexId = bridges[0];
+        if (!vertexId)
+            continue;
+        ports.push({
+            id: `port-${i}`,
+            vertexId,
+            waterHexId: waterHex.id,
+            ratio: tpl.ratio,
+            resource: tpl.resource,
+            bridges,
+        });
     }
     return ports;
 }
@@ -179,7 +366,7 @@ function buildBoardFromHexes(hexes, options) {
         vertexNeighbors,
     };
     if (options?.includeDefaultPorts) {
-        board.ports = generateDefaultPorts(board.vertices);
+        board.ports = generateDefaultPorts(board.hexes, board.vertices, board.vertexNeighbors, board.vertexHexes);
     }
     return board;
 }

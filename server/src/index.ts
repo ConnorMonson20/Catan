@@ -15,11 +15,26 @@ import {
   handlePlayKnight,
   handlePlayMonopoly,
   handlePlayRoadBuilding,
+  handleUseSpell,
   handlePlayYearOfPlenty,
   handleCheatGain,
+  handleChooseGold,
+  handleSetTeam,
+  handleSetTeamBidder,
+  handleDraftBid,
+  handleDraftPass,
+  handleAutoDraft,
+  handleAddDraftTile,
+  handleRemoveDraftTile,
+  handlePlaceDraftTile,
+  handleRemoveDraftPlacement,
+  handleDraftSpellPick,
   handleDebugSetup,
-  endGame,
+  initializeDraftMap,
   resetState,
+  handleSetReady,
+  handleSetColor,
+  handleSetColorHover,
   handleUpdateSettings,
   handleSetCustomMap,
   handleSetCustomBoard,
@@ -79,6 +94,15 @@ wss.on('connection', (ws, req) => {
 
     switch (message.type) {
       case 'join': {
+        const existingClientId = clients.get(ws);
+        if (existingClientId) {
+          const stillPresent = state.players.some((p) => p.id === existingClientId);
+          if (stillPresent) {
+            send(ws, { type: 'error', message: 'Already joined.' });
+            return;
+          }
+          clients.set(ws, null);
+        }
         if (message.playerId) {
           const existing = state.players.find((p) => p.id === message.playerId);
           if (existing) {
@@ -103,7 +127,176 @@ wss.on('connection', (ws, req) => {
           send(ws, { type: 'error', message: 'Join first.' });
           return;
         }
-        const error = startGame(state);
+        const error = startGame(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setReady': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetReady(state, playerId, message.ready);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setColor': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetColor(state, playerId, message.color);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setColorHover': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetColorHover(state, playerId, message.color);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setTeam': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetTeam(state, playerId, message.teamId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'setTeamBidder': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleSetTeamBidder(state, playerId, message.teamId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'draftBid': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleDraftBid(state, playerId, message.amount);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'draftPass': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleDraftPass(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'autoDraft': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleAutoDraft(state, playerId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'addDraftTile': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleAddDraftTile(state, playerId, message.resource, message.numberToken);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'removeDraftTile': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleRemoveDraftTile(state, playerId, message.tileId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'placeDraftTile': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handlePlaceDraftTile(state, playerId, message.hexId, message.tileId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'removeDraftPlacement': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleRemoveDraftPlacement(state, playerId, message.hexId);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
+      case 'draftSpellPick': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleDraftSpellPick(state, playerId, message.spell);
         if (error) {
           send(ws, { type: 'error', message: error });
           return;
@@ -112,10 +305,27 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'reset': {
-        endGame(state);
-        state.players = [];
-        clients.forEach((_, socket) => clients.set(socket, null));
-        broadcastState();
+        const victoryPointsToWin = state.victoryPointsToWin;
+        const discardLimit = state.discardLimit;
+        const teamMode = state.teamMode;
+        const teamMapMode = state.teamMapMode;
+        resetState(state, { randomizeBoard: true });
+        state.victoryPointsToWin = victoryPointsToWin;
+        state.discardLimit = discardLimit;
+        state.teamMode = teamMode;
+        state.teamMapMode = teamMapMode;
+        if (state.teamMode && state.teamMapMode === 'draft') {
+          initializeDraftMap(state);
+        }
+        const sockets = Array.from(wss.clients);
+        clients.clear();
+        sockets.forEach((client) => {
+          try {
+            client.close(1000, 'Reset');
+          } catch {
+            // ignore close failures
+          }
+        });
         break;
       }
       case 'cheatGain': {
@@ -183,6 +393,19 @@ wss.on('connection', (ws, req) => {
         broadcastState();
         break;
       }
+      case 'chooseGold': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleChooseGold(state, playerId, message.resource);
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
       case 'discard': {
         if (!playerId) {
           send(ws, { type: 'error', message: 'Join first.' });
@@ -243,6 +466,8 @@ wss.on('connection', (ws, req) => {
         const error = handleUpdateSettings(state, playerId, {
           victoryPointsToWin: message.victoryPointsToWin,
           discardLimit: message.discardLimit,
+          teamMode: message.teamMode,
+          teamMapMode: message.teamMapMode,
         });
         if (error) {
           send(ws, { type: 'error', message: error });
@@ -316,6 +541,35 @@ wss.on('connection', (ws, req) => {
         broadcastState();
         break;
       }
+      case 'useSpell': {
+        if (!playerId) {
+          send(ws, { type: 'error', message: 'Join first.' });
+          return;
+        }
+        const error = handleUseSpell(
+          state,
+          playerId,
+          message.spell,
+          message.hexA,
+          message.hexB,
+          message.hexes,
+          message.hexId,
+          message.number,
+          message.delta,
+          message.resource,
+          message.resourceTo,
+          message.payResource,
+          message.skipResource,
+          message.targetPlayerId,
+          message.pay,
+        );
+        if (error) {
+          send(ws, { type: 'error', message: error });
+          return;
+        }
+        broadcastState();
+        break;
+      }
       case 'bankTrade': {
         if (!playerId) {
           send(ws, { type: 'error', message: 'Join first.' });
@@ -375,6 +629,17 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    const playerId = clients.get(ws) || undefined;
     clients.delete(ws);
+    if (!playerId) return;
+    if (state.phase !== 'lobby') return;
+    const before = state.players.length;
+    state.players = state.players.filter((p) => p.id !== playerId);
+    if (state.hostId === playerId) {
+      state.hostId = state.players[0]?.id ?? null;
+    }
+    if (state.players.length !== before) {
+      broadcastState();
+    }
   });
 });

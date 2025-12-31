@@ -1,5 +1,36 @@
 export type ResourceType = 'brick' | 'lumber' | 'wool' | 'grain' | 'ore' | 'gold';
-export type HexResource = ResourceType | 'desert' | 'water' | 'cloud';
+export type HexResource = ResourceType | 'desert' | 'water' | 'cloud' | 'dev';
+export type SpellType =
+  | 'tectonic_shift'
+  | 'fertile_ground'
+  | 'seismic_rotation'
+  | 'safe_haven'
+  | 'selective_harvest'
+  | 'second_chance'
+  | 'fortunes_favor'
+  | 'switcheroo'
+  | 'smuggler'
+  | 'skilled_labor'
+  | 'coordinated_trade'
+  | 'double_cross'
+  | 'shadow_move'
+  | 'market_disruption'
+  | 'copycat';
+export type TeamId = 1 | 2;
+export type TeamMapMode = 'preloaded' | 'draft';
+export type DraftPhase = 'auction' | 'placement' | 'spell';
+
+export interface DraftTile {
+  id: string;
+  resource: ResourceType;
+  numberToken: number;
+}
+
+export interface DraftPlacement {
+  hexId: string;
+  teamId: TeamId;
+  tile: DraftTile;
+}
 
 export type DevCardType =
   | 'knight'
@@ -8,7 +39,7 @@ export type DevCardType =
   | 'year_of_plenty'
   | 'road_building';
 
-export type GamePhase = 'lobby' | 'setup' | 'turn' | 'finished';
+export type GamePhase = 'lobby' | 'draft' | 'setup' | 'turn' | 'finished';
 
 export interface HexTile {
   id: string;
@@ -45,6 +76,7 @@ export interface BoardData {
 export interface Port {
   id: string;
   vertexId: string; // mapped to a vertex in the constructed board
+  waterHexId?: string; // optional water hex id for icon placement
   ratio: 2 | 3; // 2:1 or 3:1 ports
   resource?: ResourceType | 'any';
   bridges?: string[]; // optional vertexIds for decorative bridges
@@ -63,8 +95,13 @@ export interface PlayerState {
   id: string;
   name: string;
   color: string;
+  ready: boolean;
+  hoverColor: string | null;
+  teamId: TeamId | null;
   resources: ResourceCounts;
+  pendingGold: number;
   devCards: DevCardType[];
+  spells: Record<SpellType, number>;
   newlyBoughtDev: Record<DevCardType, number>;
   devPlayedThisTurn: boolean;
   bonusRoads: number;
@@ -82,10 +119,15 @@ export interface SerializedPlayerState {
   id: string;
   name: string;
   color: string;
+  ready: boolean;
+  hoverColor: string | null;
+  teamId: TeamId | null;
   resources: ResourceCounts;
+  pendingGold: number;
   devCards: DevCardType[];
   resourceCount?: number;
   devCardCount?: number;
+  spells: Record<SpellType, number>;
   newlyBoughtDev: Record<DevCardType, number>;
   devPlayedThisTurn: boolean;
   bonusRoads: number;
@@ -112,6 +154,7 @@ export interface GameState {
   phase: GamePhase;
   board: BoardData;
   players: PlayerState[];
+  hostId: string | null;
   vertexOwner: Record<string, string | null>;
   edgeOwner: Record<string, string | null>;
   log: string[];
@@ -120,6 +163,29 @@ export interface GameState {
   revealedClouds: Record<string, ResourceType>;
   victoryPointsToWin: number;
   discardLimit: number;
+  awaitingGold: boolean;
+  teamMode: boolean;
+  teamMapMode: TeamMapMode;
+  draftPhase: DraftPhase;
+  draftTiles: Record<TeamId, DraftTile[]>;
+  draftPlacements: Record<string, DraftPlacement>;
+  draftIslandHexes: Record<TeamId, string[]>;
+  draftMapReady: boolean;
+  draftAuctionTiles: DraftTile[];
+  draftAuctionIndex: number;
+  draftCurrentBid: number;
+  draftHighestBidder: TeamId | null;
+  draftTurnTeam: TeamId;
+  draftStartingTeam: TeamId;
+  draftTeamFunds: Record<TeamId, number>;
+  draftTeamBidder: Record<TeamId, string | null>;
+  spellDraftPool: SpellType[];
+  spellDraftPicks: Record<TeamId, SpellType[]>;
+  spellDraftOrder: TeamId[];
+  spellDraftIndex: number;
+  teamSpells: Record<TeamId, Record<SpellType, number>>;
+  teamSpellUsed: Record<TeamId, boolean>;
+  roundRolls: number;
   // Tracks the vertex where the current player placed their settlement in setup (must place road from here)
   lastSetupSettlement: Record<string, string | null>;
   awaitingDiscard: boolean;
@@ -132,24 +198,64 @@ export interface GameState {
   awaitingRobber: boolean;
   lastRoll: [number, number] | null;
   devDeck: DevCardType[];
+  lastDevCardPlayed: DevCardType | null;
+  lastProduction: ProductionRecord | null;
   customMap: boolean;
   pendingTrades: TradeOffer[];
   tradeSeq: number;
+  spellSafeHavens: Array<{ hexId: string; remaining: number }>;
+  spellSelectiveHarvest: { playerId: string; number: number } | null;
+  spellSmuggler: Record<string, boolean>;
+  spellSkilledLabor: Record<string, ResourceType | null>;
+  spellSecondChance: Record<string, boolean>;
+  spellShadowMove: Record<string, boolean>;
+  spellFortunesFavor: Record<string, boolean>;
+  spellCoordinatedTrade: { teamId: TeamId; remaining: number } | null;
+  spellDoubleCross: Record<TeamId, boolean>;
+  spellPendingDoubleCross: { teamId: TeamId; playerId: string } | null;
   winnerId?: string;
+  winnerTeam?: TeamId;
+}
+
+export interface ProductionRecord {
+  playerId: string;
+  rollTotal: number;
+  resourceGains: Array<{ playerId: string; resource: ResourceType; amount: number }>;
+  devCardDraws: Array<{ playerId: string; card: DevCardType }>;
 }
 
 export type ClientMessage =
   | { type: 'join'; name: string; playerId?: string; color?: string }
   | { type: 'start' }
+  | { type: 'setReady'; ready: boolean }
+  | { type: 'setColor'; color: string }
+  | { type: 'setColorHover'; color: string | null }
   | { type: 'build'; buildType: 'road' | 'settlement' | 'city'; vertexId?: string; edgeId?: string }
   | { type: 'rollDice' }
   | { type: 'endTurn' }
   | { type: 'moveRobber'; hexId: string; targetPlayerId?: string }
+  | { type: 'chooseGold'; resource: ResourceType }
   | { type: 'buyDevCard' }
   | { type: 'playKnight'; hexId: string; targetPlayerId?: string }
   | { type: 'playMonopoly'; resource: ResourceType }
   | { type: 'playYearOfPlenty'; resourceA: ResourceType; resourceB: ResourceType }
   | { type: 'playRoadBuilding' }
+  | {
+      type: 'useSpell';
+      spell: SpellType;
+      hexId?: string;
+      hexA?: string;
+      hexB?: string;
+      hexes?: string[];
+      number?: number;
+      delta?: number;
+      resource?: ResourceType;
+      resourceTo?: ResourceType;
+      payResource?: ResourceType;
+      skipResource?: ResourceType;
+      targetPlayerId?: string;
+      pay?: Partial<ResourceCounts>;
+    }
   | { type: 'setCustomMap'; hexes: Array<{ id: string; resource: HexResource; numberToken?: number }> }
   | { type: 'setCustomBoard'; hexes: Array<{ id?: string; q: number; r: number; resource: HexResource; numberToken?: number }>; ports?: Array<{ id?: string; vertexKey?: string; ratio: 2 | 3; resource?: ResourceType | 'any'; bridges?: string[] }> }
   | { type: 'bankTrade'; give: ResourceType; get: ResourceType }
@@ -159,7 +265,17 @@ export type ClientMessage =
   | { type: 'offerTrade'; to: string; give: Partial<ResourceCounts>; get: Partial<ResourceCounts> }
   | { type: 'respondTrade'; offerId: number; accept: boolean }
   | { type: 'finalizeTrade'; offerId: number; targetId: string }
-  | { type: 'updateSettings'; victoryPointsToWin?: number; discardLimit?: number }
+  | { type: 'setTeam'; teamId: TeamId | null }
+  | { type: 'setTeamBidder'; teamId: TeamId }
+  | { type: 'draftBid'; amount: number }
+  | { type: 'draftPass' }
+  | { type: 'autoDraft' }
+  | { type: 'addDraftTile'; resource: ResourceType; numberToken: number }
+  | { type: 'removeDraftTile'; tileId: string }
+  | { type: 'placeDraftTile'; hexId: string; tileId: string }
+  | { type: 'removeDraftPlacement'; hexId: string }
+  | { type: 'draftSpellPick'; spell: SpellType }
+  | { type: 'updateSettings'; victoryPointsToWin?: number; discardLimit?: number; teamMode?: boolean; teamMapMode?: TeamMapMode }
   | { type: 'reset' };
 
 export type OutgoingMessage =
@@ -168,8 +284,9 @@ export type OutgoingMessage =
   | { type: 'info'; message: string }
   | { type: 'joined'; playerId: string };
 
-export interface PublicGameState extends Omit<GameState, 'players' | 'cloudContents'> {
+export interface PublicGameState extends Omit<GameState, 'players' | 'cloudContents' | 'lastProduction'> {
   players: SerializedPlayerState[];
+  bankPool?: ResourceCounts;
 }
 
 // Keep in sync with client-side palette; each hex maps to provided PNG icons.
