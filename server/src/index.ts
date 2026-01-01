@@ -67,6 +67,18 @@ function broadcastState() {
   });
 }
 
+function disconnectAll(reason: string) {
+  const sockets = Array.from(wss.clients);
+  clients.clear();
+  sockets.forEach((client) => {
+    try {
+      client.close(1000, reason);
+    } catch {
+      // ignore close failures
+    }
+  });
+}
+
 wss.on('connection', (ws, req) => {
   // Attempt to bind viewer immediately using playerId query param, so your own hand stays visible on reconnect
   try {
@@ -317,15 +329,12 @@ wss.on('connection', (ws, req) => {
         if (state.teamMode && state.teamMapMode === 'draft') {
           initializeDraftMap(state);
         }
-        const sockets = Array.from(wss.clients);
-        clients.clear();
-        sockets.forEach((client) => {
-          try {
-            client.close(1000, 'Reset');
-          } catch {
-            // ignore close failures
-          }
-        });
+        disconnectAll('Reset');
+        break;
+      }
+      case 'resetServer': {
+        resetState(state, { randomizeBoard: true });
+        disconnectAll('Reset');
         break;
       }
       case 'cheatGain': {

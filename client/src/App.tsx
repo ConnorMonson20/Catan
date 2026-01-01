@@ -1165,6 +1165,18 @@ export default function App() {
     send({ type: "reset" });
   };
 
+  const handleLobbyServerResetAll = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    setPendingBoard(null);
+    setMapName("");
+    setMapStatus("");
+    setMapFileName("");
+    mapPageRef.current = false;
+    setMapPage(false);
+    setError("");
+    send({ type: "resetServer" });
+  };
+
   const handleCopyRoom = async () => {
     if (!serverUrlInput || !navigator.clipboard) return;
     try {
@@ -3293,6 +3305,11 @@ export default function App() {
                   {inLobby && joined && (
                     <button className="lobby-button lobby-secondary-button" onClick={handleLobbyServerReset}>
                       Reset Lobby
+                    </button>
+                  )}
+                  {inLobby && joined && (
+                    <button className="lobby-button lobby-secondary-button" onClick={handleLobbyServerResetAll}>
+                      Reset Server
                     </button>
                   )}
                   <button className="lobby-button lobby-ghost-button" onClick={handleLobbyReset}>

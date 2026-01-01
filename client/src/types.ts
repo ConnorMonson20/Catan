@@ -238,4 +238,5 @@ export type ClientMessage =
   | { type: 'respondTrade'; offerId: number; accept: boolean }
   | { type: 'finalizeTrade'; offerId: number; targetId: string }
   | { type: 'updateSettings'; victoryPointsToWin?: number; discardLimit?: number; teamMode?: boolean; teamMapMode?: TeamMapMode }
-  | { type: 'reset' };
+  | { type: 'reset' }
+  | { type: 'resetServer' };

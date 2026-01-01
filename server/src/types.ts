@@ -276,7 +276,8 @@ export type ClientMessage =
   | { type: 'removeDraftPlacement'; hexId: string }
   | { type: 'draftSpellPick'; spell: SpellType }
   | { type: 'updateSettings'; victoryPointsToWin?: number; discardLimit?: number; teamMode?: boolean; teamMapMode?: TeamMapMode }
-  | { type: 'reset' };
+  | { type: 'reset' }
+  | { type: 'resetServer' };
 
 export type OutgoingMessage =
   | { type: 'state'; state: PublicGameState }
