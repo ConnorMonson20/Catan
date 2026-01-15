@@ -49,6 +49,7 @@ const BANK_RESOURCE_TOTALS: Record<BankResourceType, number> = {
 };
 const BASE_RESOURCE_TYPES: ResourceType[] = ["brick", "lumber", "wool", "grain", "ore", "gold"];
 const NUMBER_TOKEN_RESOURCES = new Set<string>([...BASE_RESOURCE_TYPES, "cloud", "dev"]);
+const VALID_NUMBER_TOKENS = new Set([2, 3, 4, 5, 6, 8, 9, 10, 11, 12]);
 
 const WATER_TEXTURE = "/tiles/water2.png";
 // Slight overscan to trim baked-in borders from tile PNGs.
@@ -417,7 +418,7 @@ function applyBlackForestNumbers(
     6, 6,
     8, 8,
     9, 9, 9,
-    10, 10,
+    10, 10, 10,
     11, 11,
     12, 12,
   ];
@@ -658,12 +659,29 @@ export default function App() {
       };
     });
     const hasNumberTokens = hexes.some(
-      (h) => NUMBER_TOKEN_RESOURCES.has(h.resource as string) && typeof h.numberToken === "number",
+      (h) =>
+        NUMBER_TOKEN_RESOURCES.has(h.resource as string) &&
+        typeof h.numberToken === "number" &&
+        VALID_NUMBER_TOKENS.has(h.numberToken),
     );
     const hasEligibleTiles = hexes.some((h) => NUMBER_TOKEN_RESOURCES.has(h.resource as string));
     const randomizedNumbers = !hasNumberTokens && hasEligibleTiles;
     const normalizedName = `${nameHint || parsed.name || ""}`.toLowerCase();
-    const isBlackForestFinal = normalizedName.includes("black_forest_final");
+    const resourceCounts = hexes.reduce<Record<string, number>>((acc, h) => {
+      const key = h.resource as string;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const nonEmptyCount = hexes.reduce((total, h) => total + (h.resource === "empty" ? 0 : 1), 0);
+    const waterCount = (resourceCounts.water || 0) + (resourceCounts.water_port || 0);
+    const matchesBlackForestLayout =
+      nonEmptyCount === 61 &&
+      (resourceCounts.lumber || 0) === 24 &&
+      (resourceCounts.cloud || 0) === 30 &&
+      waterCount === 6 &&
+      (resourceCounts.desert || 0) === 1;
+    const isBlackForestFinal =
+      normalizedName.includes("black_forest_final") || matchesBlackForestLayout;
     if (randomizedNumbers) {
       if (isBlackForestFinal) {
         applyBlackForestNumbers(hexes);
