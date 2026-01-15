@@ -1,4 +1,4 @@
-export type ResourceType = 'brick' | 'lumber' | 'wool' | 'grain' | 'ore' | 'gold';
+  export type ResourceType = 'brick' | 'lumber' | 'wool' | 'grain' | 'ore' | 'gold';
 export type HexResource = ResourceType | 'desert' | 'water' | 'water_port' | 'cloud' | 'dev';
 export type SpellType =
   | 'tectonic_shift'
@@ -238,5 +238,4 @@ export type ClientMessage =
   | { type: 'respondTrade'; offerId: number; accept: boolean }
   | { type: 'finalizeTrade'; offerId: number; targetId: string }
   | { type: 'updateSettings'; victoryPointsToWin?: number; discardLimit?: number; teamMode?: boolean; teamMapMode?: TeamMapMode }
-  | { type: 'reset' }
-  | { type: 'resetServer' };
+  | { type: 'reset' };

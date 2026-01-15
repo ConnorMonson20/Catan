@@ -405,6 +405,38 @@ function randomizeNumberTokens(
     idx += 1;
   }
 }
+
+function applyBlackForestNumbers(
+  hexes: Array<{ resource: HexResource | "empty"; numberToken?: number }>,
+) {
+  const pool = [
+    2, 2,
+    3, 3,
+    4, 4, 4,
+    5, 5, 5,
+    6, 6,
+    8, 8,
+    9, 9, 9,
+    10, 10,
+    11, 11,
+    12, 12,
+  ];
+  const shuffled = pool
+    .map((t) => ({ t, r: Math.random() }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.t);
+  let idx = 0;
+  for (const hex of hexes) {
+    if (!BASE_RESOURCE_TYPES.includes(hex.resource as ResourceType)) continue;
+    hex.numberToken = idx < shuffled.length ? shuffled[idx] : undefined;
+    idx += 1;
+  }
+  const cloudPool = [2, 3, 4, 5, 6, 8, 9, 10, 11, 12];
+  for (const hex of hexes) {
+    if (hex.resource !== "cloud") continue;
+    hex.numberToken = cloudPool[Math.floor(Math.random() * cloudPool.length)];
+  }
+}
 export default function App() {
   const [serverUrl, setServerUrl] = useLocalStorage("catan-server-url", "ws://localhost:3001");
   const [serverUrlInput, setServerUrlInput] = useState(serverUrl);
@@ -630,8 +662,14 @@ export default function App() {
     );
     const hasEligibleTiles = hexes.some((h) => NUMBER_TOKEN_RESOURCES.has(h.resource as string));
     const randomizedNumbers = !hasNumberTokens && hasEligibleTiles;
+    const normalizedName = `${nameHint || parsed.name || ""}`.toLowerCase();
+    const isBlackForestFinal = normalizedName.includes("black_forest_final");
     if (randomizedNumbers) {
-      randomizeNumberTokens(hexes);
+      if (isBlackForestFinal) {
+        applyBlackForestNumbers(hexes);
+      } else {
+        randomizeNumberTokens(hexes);
+      }
     }
     const portsFromFile = Array.isArray(parsed.ports) ? parsed.ports : [];
     const hexesForServer = hexes
@@ -644,7 +682,13 @@ export default function App() {
     const nextName = nameHint || parsed.name || "Custom Map";
     setMapName(nextName);
     setMapFileName(nameHint || "custom-map.json");
-    setMapStatus(randomizedNumbers ? "Loaded (randomized numbers)" : "Loaded (pending apply)");
+    setMapStatus(
+      randomizedNumbers
+        ? isBlackForestFinal
+          ? "Loaded (Black Forest numbers)"
+          : "Loaded (randomized numbers)"
+        : "Loaded (pending apply)",
+    );
     if (ws && status === "connected" && state?.phase === "lobby" && joined && playerId) {
       send({ type: "setCustomBoard", hexes: hexesForServer as any, ports: portsFromFile });
       setPendingBoard(null);
@@ -1636,6 +1680,20 @@ export default function App() {
       setSelectedDev(null);
     }
   }, [state?.awaitingGold, me?.pendingGold]);
+
+  useEffect(() => {
+    if (!state || state.phase !== "setup") return;
+    if (state.players[state.setupIndex]?.id !== playerId) return;
+    if (state.setupStep === "settlement") {
+      if (buildMode !== "settlement") setBuildMode("settlement");
+      if (paletteMode !== "settlement") setPaletteMode("settlement");
+      return;
+    }
+    if (state.setupStep === "road") {
+      if (buildMode !== "road") setBuildMode("road");
+      if (paletteMode !== "road") setPaletteMode("road");
+    }
+  }, [state, playerId, buildMode, paletteMode]);
 
   const playerLookup = useMemo(() => (state ? groupById(state.players) : {}), [state]);
 
