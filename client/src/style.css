@@ -1645,7 +1645,8 @@ section {
 .discard-overlay {
   position: absolute;
   left: 12px;
-  bottom: 112px;
+  top: 72px;
+  bottom: auto;
   min-width: 220px;
   max-width: 360px;
   background: rgba(10, 15, 25, 0.94);
